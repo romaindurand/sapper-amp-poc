@@ -4,10 +4,9 @@ import { writable } from 'svelte/store';
 import fs from 'fs';
 import path from 'path';
 import { parse } from 'cookie';
-import devalue from 'devalue';
 import fetch from 'node-fetch';
 import URL from 'url';
-import { sourcemap_stacktrace } from './sourcemap_stacktrace';
+import { get_file_contents, sourcemap_stacktrace } from './sourcemap_stacktrace';
 import {
     build_dir,
     dev,
@@ -296,26 +295,24 @@ export function get_page_handler(
 			const nonce_value = (res.locals && res.locals.nonce) ? res.locals.nonce : '';
 			const nonce_attr = nonce_value ? ` nonce="${nonce_value}"` : '';
 
-			let styles;
+			let styles = '';
 
 			// TODO make this consistent across apps
 			// TODO embed build_info in placeholder.ts
 			if (build_info.css && build_info.css.main) {
-				const css_chunks = new Set(build_info.css.main);
-				page.parts.forEach(part => {
-					if (!part || !build_info.dependencies) return;
-					const deps_for_part = build_info.dependencies[part.file];
+				styles += get_file_contents(path.join(src_dir, '../static/global.css'))
+        styles += get_file_contents(path.join(build_dir, 'client', build_info.css.main[0]))
+        page.parts.forEach(part => {
+          if (!part || !build_info.dependencies) return
+          const deps_for_part = build_info.dependencies[part.file]
 
-					if (deps_for_part) {
-						deps_for_part.filter(d => d.endsWith('.css')).forEach(chunk => {
-							css_chunks.add(chunk);
-						});
-					}
-				});
+          if (deps_for_part) {
+            deps_for_part.filter(d => d.endsWith('.css')).forEach(chunk => {
+              styles += get_file_contents(path.join(build_dir, 'client', chunk))
+            })
+          }
+        })
 
-				styles = Array.from(css_chunks)
-					.map(href => `<link rel="stylesheet" href="client/${href}">`)
-					.join('');
 			} else {
 				styles = (css && css.code ? `<style${nonce_attr}>${css.code}</style>` : '');
 			}
@@ -324,7 +321,7 @@ export function get_page_handler(
 				.replace('%sapper.base%', () => `<base href="${req.baseUrl}/">`)
 				.replace('%sapper.html%', () => html)
 				.replace('%sapper.head%', () => head)
-				.replace('%sapper.styles%', () => styles)
+				.replace('%sapper.styles%', () => `<style amp-custom>${styles}</style>`)
 				.replace(/%sapper\.cspnonce%/g, () => nonce_value);
 
 			res.statusCode = status;
@@ -353,29 +350,6 @@ export function get_page_handler(
 
 function read_amp_template(dir = build_dir) {
 	return fs.readFileSync(`${dir}/template_amp.html`, 'utf-8');
-}
-
-function try_serialize(data, fail) {
-	try {
-		return devalue(data);
-	} catch (err) {
-		if (fail) fail(err);
-		return null;
-	}
-}
-
-// Ensure we return something truthy so the client will not re-render the page over the error
-function serialize_error(error) {
-	if (!error) return null;
-	let serialized = try_serialize(error);
-	if (!serialized) {
-		const { name, message, stack } = error;
-		serialized = try_serialize({ name, message, stack });
-	}
-	if (!serialized) {
-		serialized = '{}';
-	}
-	return serialized;
 }
 
 function escape_html(html) {

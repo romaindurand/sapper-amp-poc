@@ -2,7 +2,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import { SourceMapConsumer, RawSourceMap } from 'source-map';
+import { SourceMapConsumer } from 'source-map';
 
 function get_sourcemap_url(contents) {
 	const reversed = contents
@@ -18,7 +18,7 @@ function get_sourcemap_url(contents) {
 
 const file_cache = new Map();
 
-function get_file_contents(file_path) {
+export function get_file_contents(file_path) {
 	if (file_cache.has(file_path)) {
 		return file_cache.get(file_path);
 	}
