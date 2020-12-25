@@ -25,8 +25,8 @@ export function get_page_handler(
 		: (assets => () => assets)(JSON.parse(fs.readFileSync(path.join(build_dir, 'build.json'), 'utf-8')));
 
 	const template = dev
-		? () => read_template(src_dir)
-		: (str => () => str)(read_template(build_dir));
+		? () => read_amp_template(src_dir)
+		: (str => () => str)(read_amp_template(build_dir));
 
 	const { pages, error: error_route } = manifest;
 
@@ -293,42 +293,8 @@ export function get_page_handler(
 			}
 
 			const { html, head, css } = detectClientOnlyReferences(() => App.render(props));
-
-			const serialized = {
-				preloaded: `[${preloaded.map(data => try_serialize(data, err => {
-					console.error(`Failed to serialize preloaded data to transmit to the client at the /${segments.join('/')} route: ${err.message}`);
-					console.warn('The client will re-render over the server-rendered page fresh instead of continuing where it left off. See https://sapper.svelte.dev/docs#Return_value for more information');
-				})).join(',')}]`,
-				session: session && try_serialize(session, err => {
-					throw new Error(`Failed to serialize session data: ${err.message}`);
-				}),
-				error: error && serialize_error(props.error)
-			};
-
-			let script = `__SAPPER__={${[
-				error && `error:${serialized.error},status:${status}`,
-				`baseUrl:"${req.baseUrl}"`,
-				serialized.preloaded && `preloaded:${serialized.preloaded}`,
-				serialized.session && `session:${serialized.session}`
-			].filter(Boolean).join(',')}};`;
-
-			const file = [].concat(build_info.assets.main).filter(f => f && /\.js$/.test(f))[0];
-			const main = `${req.baseUrl}/client/${file}`;
-
-			// users can set a CSP nonce using res.locals.nonce
 			const nonce_value = (res.locals && res.locals.nonce) ? res.locals.nonce : '';
 			const nonce_attr = nonce_value ? ` nonce="${nonce_value}"` : '';
-
-			if (build_info.bundler === 'rollup') {
-				if (build_info.legacy_assets) {
-					const legacy_main = `${req.baseUrl}/client/legacy/${build_info.legacy_assets.main}`;
-					script += `(function(){try{eval("async function x(){}");var main="${main}"}catch(e){main="${legacy_main}"};var s=document.createElement("script");try{new Function("if(0)import('')")();s.src=main;s.type="module";s.crossOrigin="use-credentials";}catch(e){s.src="${req.baseUrl}/client/shimport@${build_info.shimport}.js";s.setAttribute("data-main",main);}document.head.appendChild(s);}());`;
-				} else {
-					script += `var s=document.createElement("script");try{new Function("if(0)import('')")();s.src="${main}";s.type="module";s.crossOrigin="use-credentials";}catch(e){s.src="${req.baseUrl}/client/shimport@${build_info.shimport}.js";s.setAttribute("data-main","${main}")}document.head.appendChild(s)`;
-				}
-			} else {
-				script += `</script><script${nonce_attr} src="${main}" defer>`;
-			}
 
 			let styles;
 
@@ -356,7 +322,6 @@ export function get_page_handler(
 
 			const body = template()
 				.replace('%sapper.base%', () => `<base href="${req.baseUrl}/">`)
-				.replace('%sapper.scripts%', () => `<script${nonce_attr}>${script}</script>`)
 				.replace('%sapper.html%', () => html)
 				.replace('%sapper.head%', () => head)
 				.replace('%sapper.styles%', () => styles)
@@ -386,8 +351,8 @@ export function get_page_handler(
 	};
 }
 
-function read_template(dir = build_dir) {
-	return fs.readFileSync(`${dir}/template.html`, 'utf-8');
+function read_amp_template(dir = build_dir) {
+	return fs.readFileSync(`${dir}/template_amp.html`, 'utf-8');
 }
 
 function try_serialize(data, fail) {
