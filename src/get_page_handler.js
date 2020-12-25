@@ -9,21 +9,16 @@ import fetch from 'node-fetch';
 import URL from 'url';
 import { sourcemap_stacktrace } from './sourcemap_stacktrace';
 import {
-    Manifest,
-    ManifestPage,
-    SapperRequest,
-    SapperResponse,
     build_dir,
     dev,
     src_dir
 } from '@sapper/internal/manifest-server';
 import App from '@sapper/internal/App.svelte';
-import { PageContext, PreloadResult } from '@sapper/common';
 import detectClientOnlyReferences from './detect_client_only_references';
 
 export function get_page_handler(
-	manifest: Manifest,
-	session_getter: (req: SapperRequest, res: SapperResponse) => Promise<any>
+	manifest,
+	session_getter
 ) {
 	const get_build_info = dev
 		? () => JSON.parse(fs.readFileSync(path.join(build_dir, 'build.json'), 'utf-8'))
@@ -37,7 +32,7 @@ export function get_page_handler(
 
 	const { pages, error: error_route } = manifest;
 
-	function bail(res: SapperResponse, err: Error | string) {
+	function bail(res, err) {
 		console.error(err);
 
 		const message = dev ? escape_html(typeof err === 'string' ? err : err.message) : 'Internal server error';
@@ -46,7 +41,7 @@ export function get_page_handler(
 		res.end(`<pre>${message}</pre>`);
 	}
 
-	function handle_error(req: SapperRequest, res: SapperResponse, statusCode: number, error: Error | string) {
+	function handle_error(req, res, statusCode, error) {
 		handle_page({
 			pattern: null,
 			parts: [
@@ -56,20 +51,13 @@ export function get_page_handler(
 	}
 
 	async function handle_page(
-        page: ManifestPage,
-        req: SapperRequest,
-        res: SapperResponse,
+        page,
+        req,
+        res,
         status = 200,
-        error: Error | string = null) {
+        error) {
 		const is_service_worker_index = req.path === '/service-worker-index.html';
-		const build_info: {
-			bundler: 'rollup' | 'webpack',
-			shimport: string | null,
-			assets: Record<string, string | string[]>,
-			dependencies: Record<string, string[]>,
-			css?: { main: string[] },
-			legacy_assets?: Record<string, string>
-		} = get_build_info();
+		const build_info = get_build_info();
 
 		res.setHeader('Content-Type', 'text/html');
 
@@ -115,21 +103,21 @@ export function get_page_handler(
 			return bail(res, err);
 		}
 
-		let redirect: { statusCode: number, location: string };
-		let preload_error: { statusCode: number, message: Error | string };
+		let redirect;
+		let preload_error;
 
 		const preload_context = {
-			redirect: (statusCode: number, location: string) => {
+			redirect: (statusCode, location) => {
 				if (redirect && (redirect.statusCode !== statusCode || redirect.location !== location)) {
 					throw new Error('Conflicting redirects');
 				}
 				location = location.replace(/^\//g, ''); // leading slash (only)
 				redirect = { statusCode, location };
 			},
-			error: (statusCode: number, message: Error | string) => {
+			error: (statusCode, message) => {
 				preload_error = { statusCode, message };
 			},
-			fetch: (url: string, opts?: any) => {
+			fetch: (url, opts) => {
 				const protocol = req.socket.encrypted ? 'https' : 'http';
 				const parsed = new URL.URL(url, `${protocol}://127.0.0.1:${process.env.PORT}${req.baseUrl ? req.baseUrl + '/' :''}`);
 
@@ -150,7 +138,7 @@ export function get_page_handler(
 					);
 
 					const set_cookie = res.getHeader('Set-Cookie');
-					(Array.isArray(set_cookie) ? set_cookie : [set_cookie]).forEach((s: string) => {
+					(Array.isArray(set_cookie) ? set_cookie : [set_cookie]).forEach((s) => {
 						const m = /([^=]+)=([^;]+)/.exec(s);
 						if (m) cookies[m[1]] = m[2];
 					});
@@ -170,13 +158,13 @@ export function get_page_handler(
 			}
 		};
 
-		let preloaded: object[];
-		let match: RegExpExecArray;
-		let params: Record<string,string>;
+		let preloaded;
+		let match;
+		let params;
 
 		try {
 			const root_preload = manifest.root_comp.preload || (() => {});
-			const root_preloaded: PreloadResult = detectClientOnlyReferences(() =>
+			const root_preloaded = detectClientOnlyReferences(() =>
 				root_preload.call(
 					preload_context,
 					{
@@ -191,7 +179,7 @@ export function get_page_handler(
 
 			match = error ? null : page.pattern.exec(req.path);
 
-			let toPreload: PreloadResult[] = [root_preloaded];
+			let toPreload = [root_preloaded];
 			if (!is_service_worker_index) {
 				toPreload = toPreload.concat(page.parts.map(part => {
 					if (!part) return null;
@@ -263,7 +251,7 @@ export function get_page_handler(
 				error.stack = sourcemap_stacktrace(error.stack);
 			}
 
-			const pageContext: PageContext = {
+			const pageContext = {
 				host: req.headers.host,
 				path: req.path,
 				query: req.query,
@@ -353,7 +341,7 @@ export function get_page_handler(
 				script += `</script><script${nonce_attr} src="${main}" defer>`;
 			}
 
-			let styles: string;
+			let styles;
 
 			// TODO make this consistent across apps
 			// TODO embed build_info in placeholder.ts
@@ -396,7 +384,7 @@ export function get_page_handler(
 		}
 	}
 
-	return function find_route(req: SapperRequest, res: SapperResponse, next: () => void) {
+	return function find_route(req, res, next) {
 		const req_path = req.path === '/service-worker-index.html' ? '/' : req.path;
 
 		const page = pages.find(p => p.pattern.test(req_path));
@@ -413,7 +401,7 @@ function read_template(dir = build_dir) {
 	return fs.readFileSync(`${dir}/template.html`, 'utf-8');
 }
 
-function try_serialize(data: any, fail?: (err: Error) => void) {
+function try_serialize(data, fail) {
 	try {
 		return devalue(data);
 	} catch (err) {
@@ -423,11 +411,11 @@ function try_serialize(data: any, fail?: (err: Error) => void) {
 }
 
 // Ensure we return something truthy so the client will not re-render the page over the error
-function serialize_error(error: Error) {
+function serialize_error(error) {
 	if (!error) return null;
 	let serialized = try_serialize(error);
 	if (!serialized) {
-		const { name, message, stack } = error as Error;
+		const { name, message, stack } = error;
 		serialized = try_serialize({ name, message, stack });
 	}
 	if (!serialized) {
@@ -436,8 +424,8 @@ function serialize_error(error: Error) {
 	return serialized;
 }
 
-function escape_html(html: string) {
-	const chars: Record<string, string> = {
+function escape_html(html) {
+	const chars = {
 		'"' : 'quot',
 		'\'': '#39',
 		'&': 'amp',
